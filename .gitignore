@@ -1,0 +1,13 @@
+.DS_Store
+/erm_venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore data files
+/CelebA/
+/dro_venv/
+
+# Checkpoints and logs
+*.pth
+*.txt

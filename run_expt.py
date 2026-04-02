@@ -3,9 +3,8 @@ import argparse
 import pandas as pd
 import torch
 import torch.nn as nn
-import torchvision
 
-from models import model_attributes
+from models import model_attributes, MODEL_REGISTRY, create_model
 from data.data import dataset_attributes, shift_types, prepare_data, log_data
 from utils import set_seed, Logger, CSVBatchLogger, log_args
 from train import train
@@ -128,18 +127,8 @@ def main():
         d = train_data.input_size()[0]
         model = nn.Linear(d, n_classes)
         model.has_aux_logits = False
-    elif args.model == 'resnet50':
-        model = torchvision.models.resnet50(pretrained=pretrained)
-        d = model.fc.in_features
-        model.fc = nn.Linear(d, n_classes)
-    elif args.model == 'resnet34':
-        model = torchvision.models.resnet34(pretrained=pretrained)
-        d = model.fc.in_features
-        model.fc = nn.Linear(d, n_classes)
-    elif args.model == 'wideresnet50':
-        model = torchvision.models.wide_resnet50_2(pretrained=pretrained)
-        d = model.fc.in_features
-        model.fc = nn.Linear(d, n_classes)
+    elif args.model in MODEL_REGISTRY:
+        model = create_model(args.model, n_classes, pretrained=pretrained)
     elif args.model == 'bert':
         assert args.dataset == 'MultiNLI'
 

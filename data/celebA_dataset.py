@@ -23,11 +23,12 @@ class CelebADataset(ConfounderDataset):
         self.model_type = model_type
 
         # Read in attributes
-        self.attrs_df = pd.read_csv(
-            os.path.join(root_dir, 'data', 'list_attr_celeba.csv'))
+        self.attrs_df = self._read_attrs(root_dir)
 
         # Split out filenames and attribute names
-        self.data_dir = os.path.join(self.root_dir, 'data', 'img_align_celeba')
+        self.data_dir = os.path.join(self.root_dir, 'img_align_celeba')
+        if not os.path.isdir(self.data_dir):
+            self.data_dir = os.path.join(self.root_dir, 'data', 'img_align_celeba')
         self.filename_array = self.attrs_df['image_id'].values
         self.attrs_df = self.attrs_df.drop(labels='image_id', axis='columns')
         self.attr_names = self.attrs_df.columns.copy()
@@ -54,8 +55,7 @@ class CelebADataset(ConfounderDataset):
         self.group_array = (self.y_array*(self.n_groups/2) + self.confounder_array).astype('int')
 
         # Read in train/val/test splits
-        self.split_df = pd.read_csv(
-            os.path.join(root_dir, 'data', 'list_eval_partition.csv'))
+        self.split_df = self._read_split(root_dir)
         self.split_array = self.split_df['partition'].values
         self.split_dict = {
             'train': 0,
@@ -72,6 +72,38 @@ class CelebADataset(ConfounderDataset):
             self.features_mat = None
             self.train_transform = get_transform_celebA(self.model_type, train=True, augment_data=augment_data)
             self.eval_transform = get_transform_celebA(self.model_type, train=False, augment_data=augment_data)
+
+    @staticmethod
+    def _find_file(root_dir, basename):
+        """Look for basename.csv or basename.txt in root_dir or root_dir/data/."""
+        for directory in [root_dir, os.path.join(root_dir, 'data')]:
+            for ext in ['.csv', '.txt']:
+                path = os.path.join(directory, basename + ext)
+                if os.path.isfile(path):
+                    return path, ext
+        raise FileNotFoundError(
+            f"Could not find {basename}.csv or {basename}.txt "
+            f"in {root_dir} or {os.path.join(root_dir, 'data')}")
+
+    @staticmethod
+    def _read_attrs(root_dir):
+        path, ext = CelebADataset._find_file(root_dir, 'list_attr_celeba')
+        if ext == '.csv':
+            return pd.read_csv(path)
+        # Original CelebA .txt: line 1 = count, line 2 = attr names, rest = data
+        df = pd.read_csv(path, sep=r'\s+', skiprows=1)
+        df.index.name = 'image_id'
+        df.reset_index(inplace=True)
+        return df
+
+    @staticmethod
+    def _read_split(root_dir):
+        path, ext = CelebADataset._find_file(root_dir, 'list_eval_partition')
+        if ext == '.csv':
+            return pd.read_csv(path)
+        # Original CelebA .txt: no header, columns are filename and partition
+        return pd.read_csv(path, sep=r'\s+', header=None,
+                           names=['image_id', 'partition'])
 
     def attr_idx(self, attr_name):
         return self.attr_names.get_loc(attr_name)

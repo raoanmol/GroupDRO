@@ -9,10 +9,16 @@ from torch.utils.data import Dataset, DataLoader, Subset
 import numpy as np
 from tqdm import tqdm
 
-from utils import AverageMeter, accuracy
+from utils import AverageMeter, accuracy, get_device
 from loss import LossComputer
 
-from pytorch_transformers import AdamW, WarmupLinearSchedule
+try:
+    from pytorch_transformers import AdamW, WarmupLinearSchedule
+except ModuleNotFoundError:
+    try:
+        from transformers import AdamW, get_linear_schedule_with_warmup as WarmupLinearSchedule
+    except ModuleNotFoundError:
+        pass  # Only needed for BERT models
 
 def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger, args,
               is_training, show_progress=False, log_every=50, scheduler=None):
@@ -35,7 +41,7 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
     with torch.set_grad_enabled(is_training):
         for batch_idx, batch in enumerate(prog_bar_loader):
 
-            batch = tuple(t.cuda() for t in batch)
+            batch = tuple(t.to(get_device()) for t in batch)
             x = batch[0]
             y = batch[1]
             g = batch[2]
@@ -83,7 +89,7 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
 def train(model, criterion, dataset,
           logger, train_csv_logger, val_csv_logger, test_csv_logger,
           args, epoch_offset):
-    model = model.cuda()
+    model = model.to(get_device())
 
     # process generalization adjustment stuff
     adjustments = [float(c) for c in args.generalization_adjustment.split(',')]
