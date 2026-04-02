@@ -15,7 +15,8 @@ class CelebADataset(ConfounderDataset):
     """
 
     def __init__(self, root_dir, target_name, confounder_names,
-                 model_type, augment_data):
+                 model_type, augment_data,
+                 num_val_samples_per_class=None, split_seed=0):
         self.root_dir = root_dir
         self.target_name = target_name
         self.confounder_names = confounder_names
@@ -62,6 +63,36 @@ class CelebADataset(ConfounderDataset):
             'val': 1,
             'test': 2
         }
+
+        # 4-way split: redistribute original val into train/test,
+        # then sample in-domain val from expanded train
+        if num_val_samples_per_class is not None:
+            rng = np.random.RandomState(split_seed)
+
+            # 1. Redistribute original val (split==1) 50/50 into train/test
+            orig_val_indices = np.where(self.split_array == 1)[0]
+            rng.shuffle(orig_val_indices)
+            mid = len(orig_val_indices) // 2
+            self.split_array[orig_val_indices[:mid]] = 0   # → train
+            self.split_array[orig_val_indices[mid:]] = 2   # → test
+
+            # 2. Sample in-domain val from expanded train (without replacement, per class)
+            train_indices = np.where(self.split_array == 0)[0]
+            id_val_indices = []
+            for cls in range(self.n_classes):
+                class_mask = self.y_array[train_indices] == cls
+                class_indices = train_indices[class_mask]
+                sampled = rng.choice(class_indices, size=num_val_samples_per_class, replace=False)
+                id_val_indices.extend(sampled)
+            id_val_indices = np.array(id_val_indices)
+            self.split_array[id_val_indices] = 1  # → id_val
+
+            # 3. Update split_dict (OOD val handled separately in confounder_utils)
+            self.split_dict = {
+                'train': 0,
+                'id_val': 1,
+                'test': 2
+            }
 
         if model_attributes[self.model_type]['feature_type']=='precomputed':
             self.features_mat = torch.from_numpy(np.load(

@@ -30,8 +30,7 @@ class ConfounderDataset(Dataset):
             # Figure out split and transform accordingly
             if self.split_array[idx] == self.split_dict['train'] and self.train_transform:
                 img = self.train_transform(img)
-            elif (self.split_array[idx] in [self.split_dict['val'], self.split_dict['test']] and
-              self.eval_transform):
+            elif self.eval_transform:
                 img = self.eval_transform(img)
             # Flatten if needed
             if model_attributes[self.model_type]['flatten']:
@@ -44,7 +43,7 @@ class ConfounderDataset(Dataset):
     def get_splits(self, splits, train_frac=1.0):
         subsets = {}
         for split in splits:
-            assert split in ('train','val','test'), split+' is not a valid split'
+            assert split in self.split_dict, split+' is not a valid split'
             mask = self.split_array == self.split_dict[split]
             num_split = np.sum(mask)
             indices = np.where(mask)[0]

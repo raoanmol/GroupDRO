@@ -38,13 +38,11 @@ def prepare_data(args, train, return_full_dataset=False):
         return prepare_label_shift_data(args, train)
 
 def log_data(data, logger):
-    logger.write('Training Data...\n')
-    for group_idx in range(data['train_data'].n_groups):
-        logger.write(f'    {data["train_data"].group_str(group_idx)}: n = {data["train_data"].group_counts()[group_idx]:.0f}\n')
-    logger.write('Validation Data...\n')
-    for group_idx in range(data['val_data'].n_groups):
-        logger.write(f'    {data["val_data"].group_str(group_idx)}: n = {data["val_data"].group_counts()[group_idx]:.0f}\n')
-    if data['test_data'] is not None:
-        logger.write('Test Data...\n')
-        for group_idx in range(data['test_data'].n_groups):
-            logger.write(f'    {data["test_data"].group_str(group_idx)}: n = {data["test_data"].group_counts()[group_idx]:.0f}\n')
+    for split_name in ['train_data', 'id_val_data', 'val_data', 'ood_val_data', 'test_data']:
+        if split_name not in data or data[split_name] is None:
+            continue
+        label = split_name.replace('_data', '').replace('_', ' ').title()
+        logger.write(f'{label} Data...\n')
+        for group_idx in range(data[split_name].n_groups):
+            logger.write(f'    {data[split_name].group_str(group_idx)}: '
+                         f'n = {data[split_name].group_counts()[group_idx]:.0f}\n')

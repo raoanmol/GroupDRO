@@ -209,10 +209,7 @@ def train(model, criterion, dataset,
             torch.save(model, os.path.join(args.log_dir, 'last_model.pth'))
 
         if args.save_best:
-            if args.robust or args.reweight_groups:
-                curr_val_acc = min(val_loss_computer.avg_group_acc)
-            else:
-                curr_val_acc = val_loss_computer.avg_acc
+            curr_val_acc = val_loss_computer.avg_acc
             logger.write(f'Current validation accuracy: {curr_val_acc}\n')
             if curr_val_acc > best_val_acc:
                 best_val_acc = curr_val_acc
