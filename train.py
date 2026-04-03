@@ -88,7 +88,8 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
 
 def train(model, criterion, dataset,
           logger, train_csv_logger, val_csv_logger, test_csv_logger,
-          args, epoch_offset):
+          args, epoch_offset,
+          id_val_csv_logger=None, ood_val_csv_logger=None):
     model = model.to(get_device())
 
     # process generalization adjustment stuff
@@ -146,7 +147,10 @@ def train(model, criterion, dataset,
         else:
             scheduler = None
 
+    use_4way = dataset.get('id_val_data') is not None
     best_val_acc = 0
+    best_id_val_acc = 0
+    best_ood_val_acc = 0
     for epoch in range(epoch_offset, epoch_offset+args.n_epochs):
         logger.write('\nEpoch [%d]:\n' % epoch)
         logger.write(f'Training:\n')
@@ -160,19 +164,51 @@ def train(model, criterion, dataset,
             log_every=args.log_every,
             scheduler=scheduler)
 
-        logger.write(f'\nValidation:\n')
-        val_loss_computer = LossComputer(
-            criterion,
-            is_robust=args.robust,
-            dataset=dataset['val_data'],
-            step_size=args.robust_step_size,
-            alpha=args.alpha)
-        run_epoch(
-            epoch, model, optimizer,
-            dataset['val_loader'],
-            val_loss_computer,
-            logger, val_csv_logger, args,
-            is_training=False)
+        if use_4way:
+            logger.write(f'\nID Validation:\n')
+            id_val_loss_computer = LossComputer(
+                criterion,
+                is_robust=args.robust,
+                dataset=dataset['id_val_data'],
+                step_size=args.robust_step_size,
+                alpha=args.alpha)
+            run_epoch(
+                epoch, model, optimizer,
+                dataset['id_val_loader'],
+                id_val_loss_computer,
+                logger, id_val_csv_logger, args,
+                is_training=False)
+
+            logger.write(f'\nOOD Validation:\n')
+            ood_val_loss_computer = LossComputer(
+                criterion,
+                is_robust=args.robust,
+                dataset=dataset['ood_val_data'],
+                step_size=args.robust_step_size,
+                alpha=args.alpha)
+            run_epoch(
+                epoch, model, optimizer,
+                dataset['ood_val_loader'],
+                ood_val_loss_computer,
+                logger, ood_val_csv_logger, args,
+                is_training=False)
+
+            # Use id_val for scheduler/adjustment (replaces val_loss_computer)
+            val_loss_computer = id_val_loss_computer
+        else:
+            logger.write(f'\nValidation:\n')
+            val_loss_computer = LossComputer(
+                criterion,
+                is_robust=args.robust,
+                dataset=dataset['val_data'],
+                step_size=args.robust_step_size,
+                alpha=args.alpha)
+            run_epoch(
+                epoch, model, optimizer,
+                dataset['val_loader'],
+                val_loss_computer,
+                logger, val_csv_logger, args,
+                is_training=False)
 
         # Test set; don't print to avoid peeking
         if dataset['test_data'] is not None:
@@ -209,12 +245,27 @@ def train(model, criterion, dataset,
             torch.save(model, os.path.join(args.log_dir, 'last_model.pth'))
 
         if args.save_best:
-            curr_val_acc = val_loss_computer.avg_acc
-            logger.write(f'Current validation accuracy: {curr_val_acc}\n')
-            if curr_val_acc > best_val_acc:
-                best_val_acc = curr_val_acc
-                torch.save(model, os.path.join(args.log_dir, 'best_model.pth'))
-                logger.write(f'Best model saved at epoch {epoch}\n')
+            if use_4way:
+                curr_id_val_acc = id_val_loss_computer.avg_acc
+                logger.write(f'Current ID val accuracy: {curr_id_val_acc}\n')
+                if curr_id_val_acc > best_id_val_acc:
+                    best_id_val_acc = curr_id_val_acc
+                    torch.save(model, os.path.join(args.log_dir, 'best_id_model.pth'))
+                    logger.write(f'Best ID model saved at epoch {epoch}\n')
+
+                curr_ood_val_acc = ood_val_loss_computer.avg_acc
+                logger.write(f'Current OOD val accuracy: {curr_ood_val_acc}\n')
+                if curr_ood_val_acc > best_ood_val_acc:
+                    best_ood_val_acc = curr_ood_val_acc
+                    torch.save(model, os.path.join(args.log_dir, 'best_ood_model.pth'))
+                    logger.write(f'Best OOD model saved at epoch {epoch}\n')
+            else:
+                curr_val_acc = val_loss_computer.avg_acc
+                logger.write(f'Current validation accuracy: {curr_val_acc}\n')
+                if curr_val_acc > best_val_acc:
+                    best_val_acc = curr_val_acc
+                    torch.save(model, os.path.join(args.log_dir, 'best_model.pth'))
+                    logger.write(f'Best model saved at epoch {epoch}\n')
 
         if args.automatic_adjustment:
             gen_gap = val_loss_computer.avg_group_loss - train_loss_computer.exp_avg_loss
@@ -226,3 +277,26 @@ def train(model, criterion, dataset,
                     f'  {train_loss_computer.get_group_name(group_idx)}:\t'
                     f'adj = {train_loss_computer.adj[group_idx]:.3f}\n')
         logger.write('\n')
+
+    # Final test evaluation with best models
+    if args.save_best and use_4way and dataset['test_data'] is not None:
+        for label, model_path in [('ID', 'best_id_model.pth'), ('OOD', 'best_ood_model.pth')]:
+            path = os.path.join(args.log_dir, model_path)
+            if not os.path.exists(path):
+                logger.write(f'\nNo {label} best model found, skipping final test.\n')
+                continue
+            logger.write(f'\n=== Final Test Evaluation (Best {label} Val Model) ===\n')
+            best_model = torch.load(path, map_location=get_device())
+            best_model = best_model.to(get_device())
+            final_test_lc = LossComputer(
+                criterion,
+                is_robust=args.robust,
+                dataset=dataset['test_data'],
+                step_size=args.robust_step_size,
+                alpha=args.alpha)
+            run_epoch(
+                0, best_model, None,
+                dataset['test_loader'],
+                final_test_lc,
+                logger, test_csv_logger, args,
+                is_training=False)

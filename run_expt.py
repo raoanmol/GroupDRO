@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--reweight_groups', action='store_true', default=False)
     parser.add_argument('--augment_data', action='store_true', default=False)
     parser.add_argument('--val_fraction', type=float, default=0.1)
+    parser.add_argument('--num_val_samples_per_class', type=int, default=None)
     # Objective
     parser.add_argument('--robust', default=False, action='store_true')
     parser.add_argument('--alpha', type=float, default=0.2)
@@ -94,24 +95,43 @@ def main():
     # Test data for label_shift_step is not implemented yet
     test_data = None
     test_loader = None
+    id_val_data = None
+    ood_val_data = None
+    val_data = None
     if args.shift_type == 'confounder':
-        train_data, val_data, test_data = prepare_data(args, train=True)
+        splits = prepare_data(args, train=True)
+        if len(splits) == 4:
+            train_data, id_val_data, ood_val_data, test_data = splits
+        else:
+            train_data, val_data, test_data = splits
     elif args.shift_type == 'label_shift_step':
         train_data, val_data = prepare_data(args, train=True)
 
     loader_kwargs = {'batch_size':args.batch_size, 'num_workers':4, 'pin_memory':True}
     train_loader = train_data.get_loader(train=True, reweight_groups=args.reweight_groups, **loader_kwargs)
-    val_loader = val_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
     if test_data is not None:
         test_loader = test_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
 
     data = {}
     data['train_loader'] = train_loader
-    data['val_loader'] = val_loader
     data['test_loader'] = test_loader
     data['train_data'] = train_data
-    data['val_data'] = val_data
     data['test_data'] = test_data
+
+    if id_val_data is not None:
+        data['id_val_data'] = id_val_data
+        data['id_val_loader'] = id_val_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
+        data['ood_val_data'] = ood_val_data
+        data['ood_val_loader'] = ood_val_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
+        data['val_data'] = None
+        data['val_loader'] = None
+    else:
+        val_loader = val_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
+        data['val_data'] = val_data
+        data['val_loader'] = val_loader
+        data['id_val_data'] = None
+        data['ood_val_data'] = None
+
     n_classes = train_data.n_classes
 
     log_data(data, logger)
@@ -171,13 +191,28 @@ def main():
     else:
         epoch_offset=0
     train_csv_logger = CSVBatchLogger(os.path.join(args.log_dir, 'train.csv'), train_data.n_groups, mode=mode)
-    val_csv_logger =  CSVBatchLogger(os.path.join(args.log_dir, 'val.csv'), train_data.n_groups, mode=mode)
-    test_csv_logger =  CSVBatchLogger(os.path.join(args.log_dir, 'test.csv'), train_data.n_groups, mode=mode)
+    test_csv_logger = CSVBatchLogger(os.path.join(args.log_dir, 'test.csv'), train_data.n_groups, mode=mode)
 
-    train(model, criterion, data, logger, train_csv_logger, val_csv_logger, test_csv_logger, args, epoch_offset=epoch_offset)
+    if id_val_data is not None:
+        id_val_csv_logger = CSVBatchLogger(os.path.join(args.log_dir, 'id_val.csv'), train_data.n_groups, mode=mode)
+        ood_val_csv_logger = CSVBatchLogger(os.path.join(args.log_dir, 'ood_val.csv'), train_data.n_groups, mode=mode)
+        val_csv_logger = None
+    else:
+        val_csv_logger = CSVBatchLogger(os.path.join(args.log_dir, 'val.csv'), train_data.n_groups, mode=mode)
+        id_val_csv_logger = None
+        ood_val_csv_logger = None
+
+    train(model, criterion, data, logger, train_csv_logger, val_csv_logger, test_csv_logger, args,
+          epoch_offset=epoch_offset,
+          id_val_csv_logger=id_val_csv_logger, ood_val_csv_logger=ood_val_csv_logger)
 
     train_csv_logger.close()
-    val_csv_logger.close()
+    if val_csv_logger is not None:
+        val_csv_logger.close()
+    if id_val_csv_logger is not None:
+        id_val_csv_logger.close()
+    if ood_val_csv_logger is not None:
+        ood_val_csv_logger.close()
     test_csv_logger.close()
 
 def check_args(args):
