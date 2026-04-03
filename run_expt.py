@@ -1,85 +1,72 @@
-import os, csv
+import os, csv, shutil
 import argparse
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, Subset
 
+from config import load_config, check_config
 from models import model_attributes, MODEL_REGISTRY, create_model
 from data.data import dataset_attributes, shift_types, prepare_data, log_data
 from utils import set_seed, Logger, CSVBatchLogger, log_args
 from train import train
 
 
+def resolve_device(device_str: str) -> torch.device:
+    if device_str == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+    return torch.device(device_str)
+
+
+def subset_loader(loader: DataLoader, num_samples: int) -> DataLoader:
+    indices = list(range(min(num_samples, len(loader.dataset))))
+    subset = Subset(loader.dataset, indices)
+    return DataLoader(
+        subset,
+        batch_size=loader.batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False,
+    )
+
+
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="GroupDRO Training")
+    parser.add_argument("config", type=str, help="Path to YAML config file")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Override seed from config")
+    parser.add_argument("--test-mode", action="store_true",
+                        help="Quick test run with subset data and 2 epochs")
+    cli_args = parser.parse_args()
 
-    # Settings
-    parser.add_argument('-d', '--dataset', choices=dataset_attributes.keys(), required=True)
-    parser.add_argument('-s', '--shift_type', choices=shift_types, required=True)
-    # Confounders
-    parser.add_argument('-t', '--target_name')
-    parser.add_argument('-c', '--confounder_names', nargs='+')
-    # Resume?
-    parser.add_argument('--resume', default=False, action='store_true')
-    # Label shifts
-    parser.add_argument('--minority_fraction', type=float)
-    parser.add_argument('--imbalance_ratio', type=float)
-    # Data
-    parser.add_argument('--fraction', type=float, default=1.0)
-    parser.add_argument('--root_dir', default=None)
-    parser.add_argument('--reweight_groups', action='store_true', default=False)
-    parser.add_argument('--augment_data', action='store_true', default=False)
-    parser.add_argument('--val_fraction', type=float, default=0.1)
-    parser.add_argument('--num_val_samples_per_class', type=int, default=None)
-    # Objective
-    parser.add_argument('--robust', default=False, action='store_true')
-    parser.add_argument('--alpha', type=float, default=0.2)
-    parser.add_argument('--generalization_adjustment', default="0.0")
-    parser.add_argument('--automatic_adjustment', default=False, action='store_true')
-    parser.add_argument('--robust_step_size', default=0.01, type=float)
-    parser.add_argument('--use_normalized_loss', default=False, action='store_true')
-    parser.add_argument('--btl', default=False, action='store_true')
-    parser.add_argument('--hinge', default=False, action='store_true')
+    # Load and validate config
+    config = load_config(cli_args.config)
 
-    # Model
-    parser.add_argument(
-        '--model',
-        choices=model_attributes.keys(),
-        default='resnet50')
-    parser.add_argument('--train_from_scratch', action='store_true', default=False)
+    if cli_args.seed is not None:
+        config.seed = cli_args.seed
 
-    # Optimization
-    parser.add_argument('--n_epochs', type=int, default=4)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--scheduler', action='store_true', default=False)
-    parser.add_argument('--weight_decay', type=float, default=5e-5)
-    parser.add_argument('--gamma', type=float, default=0.1)
-    parser.add_argument('--minimum_variational_weight', type=float, default=0)
-    # Misc
-    parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--show_progress', default=False, action='store_true')
-    parser.add_argument('--log_dir', default='./logs')
-    parser.add_argument('--log_every', default=50, type=int)
-    parser.add_argument('--save_step', type=int, default=10)
-    parser.add_argument('--save_best', action='store_true', default=False)
-    parser.add_argument('--save_last', action='store_true', default=False)
+    check_config(config)
 
-    args = parser.parse_args()
-    check_args(args)
+    # Convert to flat namespace for backward compatibility with train.py, data/*.py, loss.py
+    args = config.to_namespace()
 
-    # BERT-specific configs copied over from run_glue.py
+    # BERT-specific configs (programmatic, not in YAML)
     if args.model == 'bert':
         args.max_grad_norm = 1.0
         args.adam_epsilon = 1e-8
         args.warmup_steps = 0
 
     if os.path.exists(args.log_dir) and args.resume:
-        resume=True
-        mode='a'
+        resume = True
+        mode = 'a'
     else:
-        resume=False
-        mode='w'
+        resume = False
+        mode = 'w'
 
     ## Initialize logs
     if not os.path.exists(args.log_dir):
@@ -88,6 +75,9 @@ def main():
     logger = Logger(os.path.join(args.log_dir, 'log.txt'), mode)
     # Record args
     log_args(args, logger)
+
+    device = resolve_device(config.device)
+    logger.write(f'Using device: {device}\n')
 
     set_seed(args.seed)
 
@@ -107,7 +97,7 @@ def main():
     elif args.shift_type == 'label_shift_step':
         train_data, val_data = prepare_data(args, train=True)
 
-    loader_kwargs = {'batch_size':args.batch_size, 'num_workers':4, 'pin_memory':True}
+    loader_kwargs = {'batch_size': args.batch_size, 'num_workers': args.num_workers, 'pin_memory': True}
     train_loader = train_data.get_loader(train=True, reweight_groups=args.reweight_groups, **loader_kwargs)
     if test_data is not None:
         test_loader = test_data.get_loader(train=False, reweight_groups=None, **loader_kwargs)
@@ -131,6 +121,20 @@ def main():
         data['val_loader'] = val_loader
         data['id_val_data'] = None
         data['ood_val_data'] = None
+
+    # Test mode: subset all loaders and override epochs
+    if cli_args.test_mode:
+        print("[TEST MODE] Running with subset data and 2 epochs")
+        data['train_loader'] = subset_loader(data['train_loader'], 20)
+        if data['test_loader'] is not None:
+            data['test_loader'] = subset_loader(data['test_loader'], 5)
+        if data.get('val_loader') is not None:
+            data['val_loader'] = subset_loader(data['val_loader'], 5)
+        if data.get('id_val_loader') is not None:
+            data['id_val_loader'] = subset_loader(data['id_val_loader'], 5)
+        if data.get('ood_val_loader') is not None:
+            data['ood_val_loader'] = subset_loader(data['ood_val_loader'], 5)
+        args.n_epochs = 2
 
     n_classes = train_data.n_classes
 
@@ -156,14 +160,14 @@ def main():
         config_class = BertConfig
         model_class = BertForSequenceClassification
 
-        config = config_class.from_pretrained(
+        bert_config = config_class.from_pretrained(
             'bert-base-uncased',
             num_labels=3,
             finetuning_task='mnli')
         model = model_class.from_pretrained(
             'bert-base-uncased',
             from_tf=False,
-            config=config)
+            config=bert_config)
     else:
         raise ValueError('Model not recognized.')
 
@@ -215,14 +219,13 @@ def main():
         ood_val_csv_logger.close()
     test_csv_logger.close()
 
-def check_args(args):
-    if args.shift_type == 'confounder':
-        assert args.confounder_names
-        assert args.target_name
-    elif args.shift_type.startswith('label_shift'):
-        assert args.minority_fraction
-        assert args.imbalance_ratio
+    # Test mode cleanup
+    if cli_args.test_mode:
+        print("[TEST MODE] Run successful. Cleaning up test artifacts...")
+        shutil.rmtree(args.log_dir)
+        print(f"[TEST MODE] Removed {args.log_dir}")
 
+    print("Done.")
 
 
 if __name__=='__main__':

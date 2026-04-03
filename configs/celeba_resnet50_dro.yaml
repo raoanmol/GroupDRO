@@ -1,0 +1,46 @@
+seed: 0
+device: "auto"
+
+data:
+  dataset: "CelebA"
+  shift_type: "confounder"
+  target_name: "Blond_Hair"
+  confounder_names: ["Male"]
+  root_dir: null
+  fraction: 1.0
+  val_fraction: 0.1
+  batch_size: 32
+  num_workers: 4
+  reweight_groups: false
+  augment_data: false
+
+model:
+  name: "resnet50"
+  train_from_scratch: false
+
+training:
+  n_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.0001
+  scheduler: false
+  gamma: 0.1
+
+robustness:
+  robust: true
+  robust_step_size: 0.01
+  alpha: 0.2
+  generalization_adjustment: "0.0"
+  automatic_adjustment: false
+  use_normalized_loss: false
+  btl: false
+  minimum_variational_weight: 0
+  hinge: false
+
+logging:
+  log_dir: "./logs/celeba_resnet50_dro"
+  log_every: 50
+  save_step: 10
+  save_best: true
+  save_last: true
+  show_progress: true
+  resume: false
