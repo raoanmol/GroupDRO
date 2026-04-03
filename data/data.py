@@ -19,6 +19,9 @@ dataset_attributes = {
     },
     'MultiNLI': {
         'root_dir': 'multinli'
+    },
+    'NICO': {
+        'root_dir': 'nico'
     }
 }
 

@@ -10,6 +10,7 @@ from data.celebA_dataset import CelebADataset
 from data.cub_dataset import CUBDataset
 from data.dro_dataset import DRODataset
 from data.multinli_dataset import MultiNLIDataset
+from data.nico_dataset import NICODataset
 
 ################
 ### SETTINGS ###
@@ -24,6 +25,9 @@ confounder_settings = {
     },
     'MultiNLI':{
         'constructor': MultiNLIDataset
+    },
+    'NICO':{
+        'constructor': NICODataset
     }
 }
 
