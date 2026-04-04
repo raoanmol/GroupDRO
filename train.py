@@ -1,4 +1,5 @@
 import os
+import json
 import types
 
 import torch
@@ -38,6 +39,11 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
     else:
         prog_bar_loader = loader
 
+    # Epoch-level accumulators (independent of loss_computer resets)
+    epoch_loss_sum = 0.0
+    epoch_correct = 0
+    epoch_total = 0
+
     with torch.set_grad_enabled(is_training):
         for batch_idx, batch in enumerate(prog_bar_loader):
 
@@ -59,6 +65,11 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
                 outputs = model(x)
 
             loss_main = loss_computer.loss(outputs, y, g, is_training)
+
+            # Track epoch-level stats
+            epoch_loss_sum += loss_main.item() * y.size(0)
+            epoch_correct += (torch.argmax(outputs, 1) == y).sum().item()
+            epoch_total += y.size(0)
 
             if is_training:
                 if args.model == 'bert':
@@ -85,11 +96,86 @@ def run_epoch(epoch, model, optimizer, loader, loss_computer, logger, csv_logger
             if is_training:
                 loss_computer.reset_stats()
 
+    return {
+        'avg_loss': epoch_loss_sum / max(epoch_total, 1),
+        'avg_acc': epoch_correct / max(epoch_total, 1)
+    }
+
+
+def log_predictions_json(model, dro_dataset, output_path, args):
+    """Evaluate model on a DRODataset and write per-sample predictions to JSON.
+
+    Each entry contains file_path, ground_truth, predicted_class, and logits.
+    """
+    model.eval()
+    device = get_device()
+
+    # Resolve the underlying full dataset and index mapping
+    inner = dro_dataset.dataset
+    if isinstance(inner, Subset):
+        full_dataset = inner.dataset
+        indices = inner.indices
+    else:
+        full_dataset = inner
+        indices = list(range(len(inner)))
+
+    has_file_paths = hasattr(full_dataset, 'data_dir') and hasattr(full_dataset, 'filename_array')
+
+    loader = DataLoader(
+        dro_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=torch.cuda.is_available())
+
+    predictions = []
+    sample_idx = 0
+
+    with torch.no_grad():
+        for batch in loader:
+            batch = tuple(t.to(device) for t in batch)
+            x, y, g = batch[0], batch[1], batch[2]
+
+            if args.model == 'bert':
+                input_ids = x[:, :, 0]
+                input_masks = x[:, :, 1]
+                segment_ids = x[:, :, 2]
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=input_masks,
+                    token_type_ids=segment_ids,
+                    labels=y
+                )[1]
+            else:
+                outputs = model(x)
+
+            for i in range(y.size(0)):
+                orig_idx = indices[sample_idx]
+
+                if has_file_paths:
+                    file_path = os.path.join(
+                        full_dataset.data_dir,
+                        full_dataset.filename_array[orig_idx])
+                else:
+                    file_path = str(orig_idx)
+
+                predictions.append({
+                    'file_path': file_path,
+                    'ground_truth': y[i].item(),
+                    'predicted_class': torch.argmax(outputs[i]).item(),
+                    'logits': [round(v, 4) for v in outputs[i].cpu().tolist()]
+                })
+                sample_idx += 1
+
+    with open(output_path, 'w') as f:
+        json.dump(predictions, f, indent=2)
+
 
 def train(model, criterion, dataset,
           logger, train_csv_logger, val_csv_logger, test_csv_logger,
           args, epoch_offset,
-          id_val_csv_logger=None, ood_val_csv_logger=None):
+          id_val_csv_logger=None, ood_val_csv_logger=None,
+          compute_tracker=None):
     model = model.to(get_device())
 
     # process generalization adjustment stuff
@@ -151,10 +237,19 @@ def train(model, criterion, dataset,
     best_val_acc = 0
     best_id_val_acc = 0
     best_ood_val_acc = 0
+
+    if compute_tracker is not None:
+        compute_tracker.start_training()
+
     for epoch in range(epoch_offset, epoch_offset+args.n_epochs):
         logger.write('\nEpoch [%d]:\n' % epoch)
         logger.write(f'Training:\n')
-        run_epoch(
+        if compute_tracker is not None:
+            compute_tracker.start_phase(
+                epoch, 'train',
+                num_samples=len(dataset['train_loader'].dataset),
+                num_batches=len(dataset['train_loader']))
+        train_epoch_stats = run_epoch(
             epoch, model, optimizer,
             dataset['train_loader'],
             train_loss_computer,
@@ -163,6 +258,8 @@ def train(model, criterion, dataset,
             show_progress=args.show_progress,
             log_every=args.log_every,
             scheduler=scheduler)
+        if compute_tracker is not None:
+            compute_tracker.end_phase(epoch, 'train')
 
         if use_4way:
             logger.write(f'\nID Validation:\n')
@@ -172,12 +269,19 @@ def train(model, criterion, dataset,
                 dataset=dataset['id_val_data'],
                 step_size=args.robust_step_size,
                 alpha=args.alpha)
+            if compute_tracker is not None:
+                compute_tracker.start_phase(
+                    epoch, 'id_val',
+                    num_samples=len(dataset['id_val_loader'].dataset),
+                    num_batches=len(dataset['id_val_loader']))
             run_epoch(
                 epoch, model, optimizer,
                 dataset['id_val_loader'],
                 id_val_loss_computer,
                 logger, id_val_csv_logger, args,
                 is_training=False)
+            if compute_tracker is not None:
+                compute_tracker.end_phase(epoch, 'id_val')
 
             logger.write(f'\nOOD Validation:\n')
             ood_val_loss_computer = LossComputer(
@@ -186,15 +290,30 @@ def train(model, criterion, dataset,
                 dataset=dataset['ood_val_data'],
                 step_size=args.robust_step_size,
                 alpha=args.alpha)
+            if compute_tracker is not None:
+                compute_tracker.start_phase(
+                    epoch, 'ood_val',
+                    num_samples=len(dataset['ood_val_loader'].dataset),
+                    num_batches=len(dataset['ood_val_loader']))
             run_epoch(
                 epoch, model, optimizer,
                 dataset['ood_val_loader'],
                 ood_val_loss_computer,
                 logger, ood_val_csv_logger, args,
                 is_training=False)
+            if compute_tracker is not None:
+                compute_tracker.end_phase(epoch, 'ood_val')
 
             # Use id_val for scheduler/adjustment (replaces val_loss_computer)
             val_loss_computer = id_val_loss_computer
+
+            # Epoch summary
+            logger.write(
+                f'Epoch {epoch} Summary: '
+                f'train_loss={train_epoch_stats["avg_loss"]:.4f}, '
+                f'train_acc={train_epoch_stats["avg_acc"]:.4f}, '
+                f'id_val_acc={id_val_loss_computer.avg_acc.item():.4f}, '
+                f'ood_val_acc={ood_val_loss_computer.avg_acc.item():.4f}\n')
         else:
             logger.write(f'\nValidation:\n')
             val_loss_computer = LossComputer(
@@ -203,12 +322,26 @@ def train(model, criterion, dataset,
                 dataset=dataset['val_data'],
                 step_size=args.robust_step_size,
                 alpha=args.alpha)
+            if compute_tracker is not None:
+                compute_tracker.start_phase(
+                    epoch, 'val',
+                    num_samples=len(dataset['val_loader'].dataset),
+                    num_batches=len(dataset['val_loader']))
             run_epoch(
                 epoch, model, optimizer,
                 dataset['val_loader'],
                 val_loss_computer,
                 logger, val_csv_logger, args,
                 is_training=False)
+            if compute_tracker is not None:
+                compute_tracker.end_phase(epoch, 'val')
+
+            # Epoch summary
+            logger.write(
+                f'Epoch {epoch} Summary: '
+                f'train_loss={train_epoch_stats["avg_loss"]:.4f}, '
+                f'train_acc={train_epoch_stats["avg_acc"]:.4f}, '
+                f'val_acc={val_loss_computer.avg_acc.item():.4f}\n')
 
         # Test set; don't print to avoid peeking
         if dataset['test_data'] is not None:
@@ -218,12 +351,19 @@ def train(model, criterion, dataset,
                 dataset=dataset['test_data'],
                 step_size=args.robust_step_size,
                 alpha=args.alpha)
+            if compute_tracker is not None:
+                compute_tracker.start_phase(
+                    epoch, 'test',
+                    num_samples=len(dataset['test_loader'].dataset),
+                    num_batches=len(dataset['test_loader']))
             run_epoch(
                 epoch, model, optimizer,
                 dataset['test_loader'],
                 test_loss_computer,
                 None, test_csv_logger, args,
                 is_training=False)
+            if compute_tracker is not None:
+                compute_tracker.end_phase(epoch, 'test')
 
         # Inspect learning rates
         if (epoch+1) % 1 == 0:
@@ -278,9 +418,17 @@ def train(model, criterion, dataset,
                     f'adj = {train_loss_computer.adj[group_idx]:.3f}\n')
         logger.write('\n')
 
-    # Final test evaluation with best models
-    if args.save_best and use_4way and dataset['test_data'] is not None:
-        for label, model_path in [('ID', 'best_id_model.pth'), ('OOD', 'best_ood_model.pth')]:
+    if compute_tracker is not None:
+        compute_tracker.end_training()
+
+    # Final test evaluation with best models and per-sample JSON predictions
+    if args.save_best and dataset['test_data'] is not None:
+        if use_4way:
+            models_to_eval = [('ID', 'best_id_model.pth'), ('OOD', 'best_ood_model.pth')]
+        else:
+            models_to_eval = [('val', 'best_model.pth')]
+
+        for label, model_path in models_to_eval:
             path = os.path.join(args.log_dir, model_path)
             if not os.path.exists(path):
                 logger.write(f'\nNo {label} best model found, skipping final test.\n')
@@ -300,3 +448,9 @@ def train(model, criterion, dataset,
                 final_test_lc,
                 logger, test_csv_logger, args,
                 is_training=False)
+
+            # Save per-sample predictions as JSON
+            json_name = f'predictions_best_{label.lower()}_model.json'
+            json_path = os.path.join(args.log_dir, json_name)
+            log_predictions_json(best_model, dataset['test_data'], json_path, args)
+            logger.write(f'Predictions saved to {json_path}\n')

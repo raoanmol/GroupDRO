@@ -10,6 +10,7 @@ from models import model_attributes, MODEL_REGISTRY, create_model
 from data.data import dataset_attributes, shift_types, prepare_data, log_data
 from utils import set_seed, Logger, CSVBatchLogger, log_args
 from train import train
+from compute_tracker import ComputeTracker
 
 
 def resolve_device(device_str: str) -> torch.device:
@@ -206,18 +207,26 @@ def main():
         id_val_csv_logger = None
         ood_val_csv_logger = None
 
-    train(model, criterion, data, logger, train_csv_logger, val_csv_logger, test_csv_logger, args,
-          epoch_offset=epoch_offset,
-          id_val_csv_logger=id_val_csv_logger, ood_val_csv_logger=ood_val_csv_logger)
+    compute_tracker = ComputeTracker(args.log_dir, device) if args.track_compute else None
 
-    train_csv_logger.close()
-    if val_csv_logger is not None:
-        val_csv_logger.close()
-    if id_val_csv_logger is not None:
-        id_val_csv_logger.close()
-    if ood_val_csv_logger is not None:
-        ood_val_csv_logger.close()
-    test_csv_logger.close()
+    try:
+        train(model, criterion, data, logger, train_csv_logger, val_csv_logger, test_csv_logger, args,
+              epoch_offset=epoch_offset,
+              id_val_csv_logger=id_val_csv_logger, ood_val_csv_logger=ood_val_csv_logger,
+              compute_tracker=compute_tracker)
+    finally:
+        train_csv_logger.close()
+        if val_csv_logger is not None:
+            val_csv_logger.close()
+        if id_val_csv_logger is not None:
+            id_val_csv_logger.close()
+        if ood_val_csv_logger is not None:
+            ood_val_csv_logger.close()
+        test_csv_logger.close()
+
+        if compute_tracker is not None:
+            compute_tracker.save()
+            compute_tracker.close()
 
     # Test mode cleanup
     if cli_args.test_mode:

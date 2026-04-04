@@ -59,6 +59,7 @@ class LoggingConfig:
     save_last: bool = False
     show_progress: bool = False
     resume: bool = False
+    track_compute: bool = True
 
 
 @dataclass
