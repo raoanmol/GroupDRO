@@ -143,10 +143,7 @@ def main():
 
     ## Initialize model
     pretrained = not args.train_from_scratch
-    if resume:
-        model = torch.load(os.path.join(args.log_dir, 'last_model.pth'))
-        d = train_data.input_size()[0]
-    elif model_attributes[args.model]['feature_type'] in ('precomputed', 'raw_flattened'):
+    if model_attributes[args.model]['feature_type'] in ('precomputed', 'raw_flattened'):
         assert pretrained
         # Load precomputed features
         d = train_data.input_size()[0]
@@ -171,6 +168,11 @@ def main():
             config=bert_config)
     else:
         raise ValueError('Model not recognized.')
+
+    if resume:
+        model.load_state_dict(torch.load(
+            os.path.join(args.log_dir, 'last_model.pth'),
+            map_location=device))
 
     logger.flush()
 

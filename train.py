@@ -379,10 +379,10 @@ def train(model, criterion, dataset,
             scheduler.step(val_loss) #scheduler step to update lr at the end of epoch
 
         if epoch % args.save_step == 0:
-            torch.save(model, os.path.join(args.log_dir, '%d_model.pth' % epoch))
+            torch.save(model.state_dict(), os.path.join(args.log_dir, '%d_model.pth' % epoch))
 
         if args.save_last:
-            torch.save(model, os.path.join(args.log_dir, 'last_model.pth'))
+            torch.save(model.state_dict(), os.path.join(args.log_dir, 'last_model.pth'))
 
         if args.save_best:
             if use_4way:
@@ -390,21 +390,21 @@ def train(model, criterion, dataset,
                 logger.write(f'Current ID val accuracy: {curr_id_val_acc}\n')
                 if curr_id_val_acc > best_id_val_acc:
                     best_id_val_acc = curr_id_val_acc
-                    torch.save(model, os.path.join(args.log_dir, 'best_id_model.pth'))
+                    torch.save(model.state_dict(), os.path.join(args.log_dir, 'best_id_model.pth'))
                     logger.write(f'Best ID model saved at epoch {epoch}\n')
 
                 curr_ood_val_acc = ood_val_loss_computer.avg_acc
                 logger.write(f'Current OOD val accuracy: {curr_ood_val_acc}\n')
                 if curr_ood_val_acc > best_ood_val_acc:
                     best_ood_val_acc = curr_ood_val_acc
-                    torch.save(model, os.path.join(args.log_dir, 'best_ood_model.pth'))
+                    torch.save(model.state_dict(), os.path.join(args.log_dir, 'best_ood_model.pth'))
                     logger.write(f'Best OOD model saved at epoch {epoch}\n')
             else:
                 curr_val_acc = val_loss_computer.avg_acc
                 logger.write(f'Current validation accuracy: {curr_val_acc}\n')
                 if curr_val_acc > best_val_acc:
                     best_val_acc = curr_val_acc
-                    torch.save(model, os.path.join(args.log_dir, 'best_model.pth'))
+                    torch.save(model.state_dict(), os.path.join(args.log_dir, 'best_model.pth'))
                     logger.write(f'Best model saved at epoch {epoch}\n')
 
         if args.automatic_adjustment:
@@ -434,8 +434,7 @@ def train(model, criterion, dataset,
                 logger.write(f'\nNo {label} best model found, skipping final test.\n')
                 continue
             logger.write(f'\n=== Final Test Evaluation (Best {label} Val Model) ===\n')
-            best_model = torch.load(path, map_location=get_device())
-            best_model = best_model.to(get_device())
+            model.load_state_dict(torch.load(path, map_location=get_device()))
             final_test_lc = LossComputer(
                 criterion,
                 is_robust=args.robust,
@@ -443,7 +442,7 @@ def train(model, criterion, dataset,
                 step_size=args.robust_step_size,
                 alpha=args.alpha)
             run_epoch(
-                0, best_model, None,
+                0, model, None,
                 dataset['test_loader'],
                 final_test_lc,
                 logger, test_csv_logger, args,
@@ -452,5 +451,5 @@ def train(model, criterion, dataset,
             # Save per-sample predictions as JSON
             json_name = f'predictions_best_{label.lower()}_model.json'
             json_path = os.path.join(args.log_dir, json_name)
-            log_predictions_json(best_model, dataset['test_data'], json_path, args)
+            log_predictions_json(model, dataset['test_data'], json_path, args)
             logger.write(f'Predictions saved to {json_path}\n')
