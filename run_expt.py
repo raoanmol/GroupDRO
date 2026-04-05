@@ -245,10 +245,10 @@ def main():
             compute_tracker.close()
 
     # Test mode cleanup
-    # if cli_args.test_mode:
-    #     print("[TEST MODE] Run successful. Cleaning up test artifacts...")
-    #     shutil.rmtree(args.log_dir)
-    #     print(f"[TEST MODE] Removed {args.log_dir}")
+    if cli_args.test_mode:
+        print("[TEST MODE] Run successful. Cleaning up test artifacts...")
+        shutil.rmtree(args.log_dir)
+        print(f"[TEST MODE] Removed {args.log_dir}")
 
     print("Done.")
 

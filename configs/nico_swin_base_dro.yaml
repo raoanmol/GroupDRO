@@ -6,7 +6,7 @@ data:
   shift_type: "confounder"
   target_name: "class"
   confounder_names: ["context"]
-  root_dir: "/path/to/nico_data"
+  root_dir: "./NICO++/DG_Benchmark/"
   num_val_samples_per_class: 37
   batch_size: 32
   num_workers: 4

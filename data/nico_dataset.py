@@ -33,10 +33,8 @@ class NICODataset(ConfounderDataset):
         self.model_type = model_type
         self.augment_data = augment_data
 
-        self.data_dir = os.path.join(root_dir, "DG_Benchmark", "NICO_DG_Benchmark")
-        annotation_dir = os.path.join(
-            root_dir, "DG_Benchmark", "NICO_DG_Benchmark_annotation"
-        )
+        self.data_dir = os.path.join(root_dir, "NICO_DG_Benchmark")
+        annotation_dir = os.path.join(root_dir, "NICO_DG_Benchmark_annotation")
 
         # Determine which contexts to use
         self.contexts = sorted([c for c in ALL_CONTEXTS if c not in EXCLUDED_CONTEXTS])
