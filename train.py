@@ -15,13 +15,13 @@ from loss import LossComputer
 
 try:
     from pytorch_transformers import AdamW, WarmupLinearSchedule
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     try:
+        from torch.optim import AdamW
         from transformers import (
-            AdamW,
             get_linear_schedule_with_warmup as WarmupLinearSchedule,
         )
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, ImportError):
         pass  # Only needed for BERT models
 
 
@@ -101,14 +101,16 @@ def run_epoch(
                     optimizer.step()
 
             if is_training and (batch_idx + 1) % log_every == 0:
-                csv_logger.log(epoch, batch_idx, loss_computer.get_stats(model, args))
-                csv_logger.flush()
+                if csv_logger is not None:
+                    csv_logger.log(epoch, batch_idx, loss_computer.get_stats(model, args))
+                    csv_logger.flush()
                 loss_computer.log_stats(logger, is_training)
                 loss_computer.reset_stats()
 
         if (not is_training) or loss_computer.batch_count > 0:
-            csv_logger.log(epoch, batch_idx, loss_computer.get_stats(model, args))
-            csv_logger.flush()
+            if csv_logger is not None:
+                csv_logger.log(epoch, batch_idx, loss_computer.get_stats(model, args))
+                csv_logger.flush()
             loss_computer.log_stats(logger, is_training)
             if is_training:
                 loss_computer.reset_stats()
@@ -198,13 +200,8 @@ def train(
     criterion,
     dataset,
     logger,
-    train_csv_logger,
-    val_csv_logger,
-    test_csv_logger,
     args,
     epoch_offset,
-    id_val_csv_logger=None,
-    ood_val_csv_logger=None,
     compute_tracker=None,
 ):
     model = model.to(get_device())
@@ -280,6 +277,16 @@ def train(
             scheduler = None
 
     use_4way = dataset.get("id_val_data") is not None
+
+    # Open metrics.csv for epoch-level logging
+    metrics_path = os.path.join(args.log_dir, "metrics.csv")
+    metrics_file = open(metrics_path, "w")
+    if use_4way:
+        metrics_file.write("epoch,train_loss,train_acc,id_val_acc,ood_val_acc\n")
+    else:
+        metrics_file.write("epoch,train_loss,train_acc,val_acc\n")
+    metrics_file.flush()
+
     best_val_acc = 0
     best_id_val_acc = 0
     best_ood_val_acc = 0
@@ -289,7 +296,7 @@ def train(
 
     for epoch in range(epoch_offset, epoch_offset + args.n_epochs):
         logger.write("\nEpoch [%d]:\n" % epoch)
-        logger.write(f"Training:\n")
+        logger.write("Training:\n")
         if compute_tracker is not None:
             compute_tracker.start_phase(
                 epoch,
@@ -304,7 +311,7 @@ def train(
             dataset["train_loader"],
             train_loss_computer,
             logger,
-            train_csv_logger,
+            None,
             args,
             is_training=True,
             show_progress=args.show_progress,
@@ -315,7 +322,7 @@ def train(
             compute_tracker.end_phase(epoch, "train")
 
         if use_4way:
-            logger.write(f"\nID Validation:\n")
+            logger.write("\nID Validation:\n")
             id_val_loss_computer = LossComputer(
                 criterion,
                 is_robust=args.robust,
@@ -337,14 +344,14 @@ def train(
                 dataset["id_val_loader"],
                 id_val_loss_computer,
                 logger,
-                id_val_csv_logger,
+                None,
                 args,
                 is_training=False,
             )
             if compute_tracker is not None:
                 compute_tracker.end_phase(epoch, "id_val")
 
-            logger.write(f"\nOOD Validation:\n")
+            logger.write("\nOOD Validation:\n")
             ood_val_loss_computer = LossComputer(
                 criterion,
                 is_robust=args.robust,
@@ -366,7 +373,7 @@ def train(
                 dataset["ood_val_loader"],
                 ood_val_loss_computer,
                 logger,
-                ood_val_csv_logger,
+                None,
                 args,
                 is_training=False,
             )
@@ -376,16 +383,44 @@ def train(
             # Use id_val for scheduler/adjustment (replaces val_loss_computer)
             val_loss_computer = id_val_loss_computer
 
+            id_val_acc = id_val_loss_computer.avg_acc.item()
+            ood_val_acc = ood_val_loss_computer.avg_acc.item()
+
             # Epoch summary
             logger.write(
                 f"Epoch {epoch} Summary: "
                 f"train_loss={train_epoch_stats['avg_loss']:.4f}, "
                 f"train_acc={train_epoch_stats['avg_acc']:.4f}, "
-                f"id_val_acc={id_val_loss_computer.avg_acc.item():.4f}, "
-                f"ood_val_acc={ood_val_loss_computer.avg_acc.item():.4f}\n"
+                f"id_val_acc={id_val_acc:.4f}, "
+                f"ood_val_acc={ood_val_acc:.4f}\n"
             )
+
+            # Write to metrics.csv
+            metrics_file.write(
+                f"{epoch},{train_epoch_stats['avg_loss']:.6f},"
+                f"{train_epoch_stats['avg_acc']:.4f},"
+                f"{id_val_acc:.4f},{ood_val_acc:.4f}\n"
+            )
+            metrics_file.flush()
+
+            # Save best models
+            if id_val_acc > best_id_val_acc:
+                best_id_val_acc = id_val_acc
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(args.log_dir, "best_id_model.pth"),
+                )
+                logger.write(f"Best ID model saved at epoch {epoch}\n")
+
+            if ood_val_acc > best_ood_val_acc:
+                best_ood_val_acc = ood_val_acc
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(args.log_dir, "best_ood_model.pth"),
+                )
+                logger.write(f"Best OOD model saved at epoch {epoch}\n")
         else:
-            logger.write(f"\nValidation:\n")
+            logger.write("\nValidation:\n")
             val_loss_computer = LossComputer(
                 criterion,
                 is_robust=args.robust,
@@ -407,56 +442,44 @@ def train(
                 dataset["val_loader"],
                 val_loss_computer,
                 logger,
-                val_csv_logger,
+                None,
                 args,
                 is_training=False,
             )
             if compute_tracker is not None:
                 compute_tracker.end_phase(epoch, "val")
 
+            curr_val_acc = val_loss_computer.avg_acc.item()
+
             # Epoch summary
             logger.write(
                 f"Epoch {epoch} Summary: "
                 f"train_loss={train_epoch_stats['avg_loss']:.4f}, "
                 f"train_acc={train_epoch_stats['avg_acc']:.4f}, "
-                f"val_acc={val_loss_computer.avg_acc.item():.4f}\n"
+                f"val_acc={curr_val_acc:.4f}\n"
             )
 
-        # Test set; don't print to avoid peeking
-        if dataset["test_data"] is not None:
-            test_loss_computer = LossComputer(
-                criterion,
-                is_robust=args.robust,
-                dataset=dataset["test_data"],
-                step_size=args.robust_step_size,
-                alpha=args.alpha,
+            # Write to metrics.csv
+            metrics_file.write(
+                f"{epoch},{train_epoch_stats['avg_loss']:.6f},"
+                f"{train_epoch_stats['avg_acc']:.4f},"
+                f"{curr_val_acc:.4f}\n"
             )
-            if compute_tracker is not None:
-                compute_tracker.start_phase(
-                    epoch,
-                    "test",
-                    num_samples=len(dataset["test_loader"].dataset),
-                    num_batches=len(dataset["test_loader"]),
+            metrics_file.flush()
+
+            # Save best model
+            if curr_val_acc > best_val_acc:
+                best_val_acc = curr_val_acc
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(args.log_dir, "best_model.pth"),
                 )
-            run_epoch(
-                epoch,
-                model,
-                optimizer,
-                dataset["test_loader"],
-                test_loss_computer,
-                None,
-                test_csv_logger,
-                args,
-                is_training=False,
-            )
-            if compute_tracker is not None:
-                compute_tracker.end_phase(epoch, "test")
+                logger.write(f"Best model saved at epoch {epoch}\n")
 
         # Inspect learning rates
-        if (epoch + 1) % 1 == 0:
-            for param_group in optimizer.param_groups:
-                curr_lr = param_group["lr"]
-                logger.write("Current lr: %f\n" % curr_lr)
+        for param_group in optimizer.param_groups:
+            curr_lr = param_group["lr"]
+            logger.write("Current lr: %f\n" % curr_lr)
 
         if args.scheduler and args.model != "bert":
             if args.robust:
@@ -465,46 +488,7 @@ def train(
                 )
             else:
                 val_loss = val_loss_computer.avg_actual_loss
-            scheduler.step(val_loss)  # scheduler step to update lr at the end of epoch
-
-        if epoch % args.save_step == 0:
-            torch.save(
-                model.state_dict(), os.path.join(args.log_dir, "%d_model.pth" % epoch)
-            )
-
-        if args.save_last:
-            torch.save(model.state_dict(), os.path.join(args.log_dir, "last_model.pth"))
-
-        if args.save_best:
-            if use_4way:
-                curr_id_val_acc = id_val_loss_computer.avg_acc
-                logger.write(f"Current ID val accuracy: {curr_id_val_acc}\n")
-                if curr_id_val_acc > best_id_val_acc:
-                    best_id_val_acc = curr_id_val_acc
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(args.log_dir, "best_id_model.pth"),
-                    )
-                    logger.write(f"Best ID model saved at epoch {epoch}\n")
-
-                curr_ood_val_acc = ood_val_loss_computer.avg_acc
-                logger.write(f"Current OOD val accuracy: {curr_ood_val_acc}\n")
-                if curr_ood_val_acc > best_ood_val_acc:
-                    best_ood_val_acc = curr_ood_val_acc
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(args.log_dir, "best_ood_model.pth"),
-                    )
-                    logger.write(f"Best OOD model saved at epoch {epoch}\n")
-            else:
-                curr_val_acc = val_loss_computer.avg_acc
-                logger.write(f"Current validation accuracy: {curr_val_acc}\n")
-                if curr_val_acc > best_val_acc:
-                    best_val_acc = curr_val_acc
-                    torch.save(
-                        model.state_dict(), os.path.join(args.log_dir, "best_model.pth")
-                    )
-                    logger.write(f"Best model saved at epoch {epoch}\n")
+            scheduler.step(val_loss)
 
         if args.automatic_adjustment:
             gen_gap = (
@@ -520,20 +504,24 @@ def train(
                 )
         logger.write("\n")
 
+    metrics_file.close()
+
     if compute_tracker is not None:
         compute_tracker.end_training()
 
-    # Final test evaluation with best models and per-sample JSON predictions
-    if args.save_best and dataset["test_data"] is not None:
+    # Final test evaluation with best models, per-sample JSON, and test_results.csv
+    if dataset["test_data"] is not None:
         if use_4way:
             models_to_eval = [
-                ("ID", "best_id_model.pth"),
-                ("OOD", "best_ood_model.pth"),
+                ("ID", "best_id_model.pth", "best_id_val"),
+                ("OOD", "best_ood_model.pth", "best_ood_val"),
             ]
         else:
-            models_to_eval = [("val", "best_model.pth")]
+            models_to_eval = [("val", "best_model.pth", "best_val")]
 
-        for label, model_path in models_to_eval:
+        test_results = []
+
+        for label, model_path, result_key in models_to_eval:
             path = os.path.join(args.log_dir, model_path)
             if not os.path.exists(path):
                 logger.write(f"\nNo {label} best model found, skipping final test.\n")
@@ -547,20 +535,31 @@ def train(
                 step_size=args.robust_step_size,
                 alpha=args.alpha,
             )
-            run_epoch(
+            test_stats = run_epoch(
                 0,
                 model,
                 None,
                 dataset["test_loader"],
                 final_test_lc,
                 logger,
-                test_csv_logger,
+                None,
                 args,
                 is_training=False,
             )
+
+            test_results.append((result_key, test_stats["avg_acc"]))
 
             # Save per-sample predictions as JSON
             json_name = f"predictions_best_{label.lower()}_model.json"
             json_path = os.path.join(args.log_dir, json_name)
             log_predictions_json(model, dataset["test_data"], json_path, args)
             logger.write(f"Predictions saved to {json_path}\n")
+
+        # Write test_results.csv
+        if test_results:
+            results_path = os.path.join(args.log_dir, "test_results.csv")
+            with open(results_path, "w") as f:
+                f.write("model_selection,test_acc\n")
+                for key, acc in test_results:
+                    f.write(f"{key},{acc:.4f}\n")
+            logger.write(f"\nTest results saved to {results_path}\n")

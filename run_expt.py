@@ -1,6 +1,5 @@
-import os, csv, shutil
+import os, shutil
 import argparse
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
@@ -8,7 +7,7 @@ from torch.utils.data import DataLoader, Subset
 from config import load_config, check_config
 from models import model_attributes, MODEL_REGISTRY, create_model
 from data.data import dataset_attributes, shift_types, prepare_data, log_data
-from utils import set_seed, Logger, CSVBatchLogger, log_args
+from utils import set_seed, Logger, log_args
 from train import train
 from compute_tracker import ComputeTracker
 
@@ -213,32 +212,18 @@ def main():
         criterion = torch.nn.CrossEntropyLoss(reduction="none")
 
     if resume:
-        df = pd.read_csv(os.path.join(args.log_dir, "test.csv"))
-        epoch_offset = df.loc[len(df) - 1, "epoch"] + 1
-        logger.write(f"starting from epoch {epoch_offset}")
+        # Read epoch offset from metrics.csv if resuming
+        metrics_path = os.path.join(args.log_dir, "metrics.csv")
+        if os.path.exists(metrics_path):
+            import csv
+            with open(metrics_path) as f:
+                rows = list(csv.DictReader(f))
+            epoch_offset = int(rows[-1]["epoch"]) + 1 if rows else 0
+            logger.write(f"starting from epoch {epoch_offset}")
+        else:
+            epoch_offset = 0
     else:
         epoch_offset = 0
-    train_csv_logger = CSVBatchLogger(
-        os.path.join(args.log_dir, "train.csv"), train_data.n_groups, mode=mode
-    )
-    test_csv_logger = CSVBatchLogger(
-        os.path.join(args.log_dir, "test.csv"), train_data.n_groups, mode=mode
-    )
-
-    if id_val_data is not None:
-        id_val_csv_logger = CSVBatchLogger(
-            os.path.join(args.log_dir, "id_val.csv"), train_data.n_groups, mode=mode
-        )
-        ood_val_csv_logger = CSVBatchLogger(
-            os.path.join(args.log_dir, "ood_val.csv"), train_data.n_groups, mode=mode
-        )
-        val_csv_logger = None
-    else:
-        val_csv_logger = CSVBatchLogger(
-            os.path.join(args.log_dir, "val.csv"), train_data.n_groups, mode=mode
-        )
-        id_val_csv_logger = None
-        ood_val_csv_logger = None
 
     compute_tracker = (
         ComputeTracker(args.log_dir, device) if args.track_compute else None
@@ -250,34 +235,20 @@ def main():
             criterion,
             data,
             logger,
-            train_csv_logger,
-            val_csv_logger,
-            test_csv_logger,
             args,
             epoch_offset=epoch_offset,
-            id_val_csv_logger=id_val_csv_logger,
-            ood_val_csv_logger=ood_val_csv_logger,
             compute_tracker=compute_tracker,
         )
     finally:
-        train_csv_logger.close()
-        if val_csv_logger is not None:
-            val_csv_logger.close()
-        if id_val_csv_logger is not None:
-            id_val_csv_logger.close()
-        if ood_val_csv_logger is not None:
-            ood_val_csv_logger.close()
-        test_csv_logger.close()
-
         if compute_tracker is not None:
             compute_tracker.save()
             compute_tracker.close()
 
     # Test mode cleanup
-    if cli_args.test_mode:
-        print("[TEST MODE] Run successful. Cleaning up test artifacts...")
-        shutil.rmtree(args.log_dir)
-        print(f"[TEST MODE] Removed {args.log_dir}")
+    # if cli_args.test_mode:
+    #     print("[TEST MODE] Run successful. Cleaning up test artifacts...")
+    #     shutil.rmtree(args.log_dir)
+    #     print(f"[TEST MODE] Removed {args.log_dir}")
 
     print("Done.")
 
