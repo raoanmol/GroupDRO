@@ -5,7 +5,7 @@ __pycache__/
 *$py.class
 
 # Ignore data files
-/CelebA/
+/celebA/
 /dro_venv/
 /NICO++/
 
