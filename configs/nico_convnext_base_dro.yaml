@@ -1,0 +1,39 @@
+seed: 42
+device: "auto"
+
+data:
+  dataset: "NICO"
+  shift_type: "confounder"
+  target_name: "class"
+  confounder_names: ["context"]
+  root_dir: "/path/to/nico_data"
+  num_val_samples_per_class: 37
+  batch_size: 32
+  num_workers: 4
+  reweight_groups: true
+  augment_data: true
+
+model:
+  name: "convnext_base"
+  train_from_scratch: false
+
+training:
+  n_epochs: 50
+  lr: 0.001
+  weight_decay: 0.0001
+  scheduler: false
+  gamma: 0.1
+
+robustness:
+  robust: true
+  robust_step_size: 0.01
+  alpha: 0.2
+  generalization_adjustment: "0.0"
+
+logging:
+  log_dir: "./logs/nico_convnext_base_dro"
+  log_every: 50
+  save_step: 10
+  save_best: true
+  save_last: true
+  show_progress: true

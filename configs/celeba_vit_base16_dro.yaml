@@ -4,19 +4,18 @@ device: "auto"
 data:
   dataset: "CelebA"
   shift_type: "confounder"
-  target_name: "Blond_Hair"
-  confounder_names: ["Male"]
-  root_dir: null
+  target_name: "Male"
+  confounder_names: ["Young"]
+  root_dir: "./celebA/data/"
   fraction: 1.0
-  val_fraction: 0.1
   num_val_samples_per_class: 1495
   batch_size: 64
   num_workers: 4
-  reweight_groups: false
+  reweight_groups: true
   augment_data: false
 
 model:
-  name: "resnet50"
+  name: "vit_base16"
   train_from_scratch: false
 
 training:
@@ -31,17 +30,11 @@ robustness:
   robust_step_size: 0.01
   alpha: 0.2
   generalization_adjustment: "0.0"
-  automatic_adjustment: false
-  use_normalized_loss: false
-  btl: false
-  minimum_variational_weight: 0
-  hinge: false
 
 logging:
-  log_dir: "./logs/celeba_resnet50_4way_dro"
+  log_dir: "./logs/celeba_vit_base16_dro"
   log_every: 50
   save_step: 10
   save_best: true
   save_last: true
   show_progress: true
-  resume: false

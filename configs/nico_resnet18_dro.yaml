@@ -7,14 +7,14 @@ data:
   target_name: "class"
   confounder_names: ["context"]
   root_dir: "/path/to/nico_data"
-  num_val_samples_per_class: 10
+  num_val_samples_per_class: 37
   batch_size: 32
   num_workers: 4
-  reweight_groups: false
-  augment_data: false
+  reweight_groups: true
+  augment_data: true
 
 model:
-  name: "resnet50"
+  name: "resnet18"
   train_from_scratch: false
 
 training:
@@ -28,9 +28,10 @@ robustness:
   robust: true
   robust_step_size: 0.01
   alpha: 0.2
+  generalization_adjustment: "0.0"
 
 logging:
-  log_dir: "./logs/nico_resnet50_dro"
+  log_dir: "./logs/nico_resnet18_dro"
   log_every: 50
   save_step: 10
   save_best: true

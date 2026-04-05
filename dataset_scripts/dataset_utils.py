@@ -1,6 +1,7 @@
 from PIL import Image
 import numpy as np
 
+
 def crop_and_resize(source_img, target_img):
     """
     Make source_img exactly the same as target_img by expanding/shrinking and
@@ -25,12 +26,20 @@ def crop_and_resize(source_img, target_img):
     # Check if source does not completely cover target
     if (source_width < target_width) or (source_height < target_height):
         # Try matching width
-        width_resize = (target_width, int((target_width / source_width) * source_height))
+        width_resize = (
+            target_width,
+            int((target_width / source_width) * source_height),
+        )
         if (width_resize[0] >= target_width) and (width_resize[1] >= target_height):
             source_resized = source_img.resize(width_resize, Image.ANTIALIAS)
         else:
-            height_resize = (int((target_height / source_height) * source_width), target_height)
-            assert (height_resize[0] >= target_width) and (height_resize[1] >= target_height)
+            height_resize = (
+                int((target_height / source_height) * source_width),
+                target_height,
+            )
+            assert (height_resize[0] >= target_width) and (
+                height_resize[1] >= target_height
+            )
             source_resized = source_img.resize(height_resize, Image.ANTIALIAS)
         # Rerun the cropping
         return crop_and_resize(source_resized, target_img)
@@ -49,7 +58,9 @@ def crop_and_resize(source_img, target_img):
         offset = (source_height - new_source_height) // 2
         resize = (0, offset, source_width, source_height - offset)
 
-    source_resized = source_img.crop(resize).resize((target_width, target_height), Image.ANTIALIAS)
+    source_resized = source_img.crop(resize).resize(
+        (target_width, target_height), Image.ANTIALIAS
+    )
     return source_resized
 
 

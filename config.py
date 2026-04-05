@@ -77,15 +77,15 @@ class Config:
         the legacy args interface used by train.py, data/*.py, and loss.py."""
         flat = {}
 
-        flat['seed'] = self.seed
-        flat['device'] = self.device
+        flat["seed"] = self.seed
+        flat["device"] = self.device
 
         for f in fields(self.data):
             flat[f.name] = getattr(self.data, f.name)
 
         # model.name -> args.model (downstream code expects args.model)
-        flat['model'] = self.model.name
-        flat['train_from_scratch'] = self.model.train_from_scratch
+        flat["model"] = self.model.name
+        flat["train_from_scratch"] = self.model.train_from_scratch
 
         for f in fields(self.training):
             flat[f.name] = getattr(self.training, f.name)
@@ -125,23 +125,25 @@ def check_config(config: Config) -> None:
     from models import model_attributes
 
     if config.data.dataset not in dataset_attributes:
-        valid = ', '.join(dataset_attributes.keys())
+        valid = ", ".join(dataset_attributes.keys())
         raise ValueError(f"Unknown dataset '{config.data.dataset}'. Valid: {valid}")
 
     if config.model.name not in model_attributes:
-        valid = ', '.join(model_attributes.keys())
+        valid = ", ".join(model_attributes.keys())
         raise ValueError(f"Unknown model '{config.model.name}'. Valid: {valid}")
 
     if config.data.shift_type not in shift_types:
-        raise ValueError(f"Unknown shift_type '{config.data.shift_type}'. Valid: {shift_types}")
+        raise ValueError(
+            f"Unknown shift_type '{config.data.shift_type}'. Valid: {shift_types}"
+        )
 
-    if config.data.shift_type == 'confounder':
+    if config.data.shift_type == "confounder":
         if not config.data.confounder_names:
             raise ValueError("confounder_names required when shift_type='confounder'")
         if not config.data.target_name:
             raise ValueError("target_name required when shift_type='confounder'")
 
-    if config.data.shift_type.startswith('label_shift'):
+    if config.data.shift_type.startswith("label_shift"):
         if config.data.minority_fraction is None:
             raise ValueError("minority_fraction required for label_shift")
         if config.data.imbalance_ratio is None:

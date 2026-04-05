@@ -4,8 +4,9 @@ import torch
 import numpy as np
 import csv
 
+
 class Logger(object):
-    def __init__(self, fpath=None, mode='w'):
+    def __init__(self, fpath=None, mode="w"):
         self.console = sys.stdout
         self.file = None
         if fpath is not None:
@@ -36,32 +37,33 @@ class Logger(object):
         if self.file is not None:
             self.file.close()
 
+
 class CSVBatchLogger:
-    def __init__(self, csv_path, n_groups, mode='w'):
-        columns = ['epoch', 'batch']
+    def __init__(self, csv_path, n_groups, mode="w"):
+        columns = ["epoch", "batch"]
         for idx in range(n_groups):
-            columns.append(f'avg_loss_group:{idx}')
-            columns.append(f'exp_avg_loss_group:{idx}')
-            columns.append(f'avg_acc_group:{idx}')
-            columns.append(f'processed_data_count_group:{idx}')
-            columns.append(f'update_data_count_group:{idx}')
-            columns.append(f'update_batch_count_group:{idx}')
-        columns.append('avg_actual_loss')
-        columns.append('avg_per_sample_loss')
-        columns.append('avg_acc')
-        columns.append('model_norm_sq')
-        columns.append('reg_loss')
+            columns.append(f"avg_loss_group:{idx}")
+            columns.append(f"exp_avg_loss_group:{idx}")
+            columns.append(f"avg_acc_group:{idx}")
+            columns.append(f"processed_data_count_group:{idx}")
+            columns.append(f"update_data_count_group:{idx}")
+            columns.append(f"update_batch_count_group:{idx}")
+        columns.append("avg_actual_loss")
+        columns.append("avg_per_sample_loss")
+        columns.append("avg_acc")
+        columns.append("model_norm_sq")
+        columns.append("reg_loss")
 
         self.path = csv_path
         self.file = open(csv_path, mode)
         self.columns = columns
         self.writer = csv.DictWriter(self.file, fieldnames=columns)
-        if mode=='w':
+        if mode == "w":
             self.writer.writeheader()
 
     def log(self, epoch, batch, stats_dict):
-        stats_dict['epoch'] = epoch
-        stats_dict['batch'] = batch
+        stats_dict["epoch"] = epoch
+        stats_dict["batch"] = batch
         self.writer.writerow(stats_dict)
 
     def flush(self):
@@ -70,15 +72,18 @@ class CSVBatchLogger:
     def close(self):
         self.file.close()
 
+
 def get_device():
     if torch.cuda.is_available():
-        return torch.device('cuda')
+        return torch.device("cuda")
     elif torch.backends.mps.is_available():
-        return torch.device('mps')
-    return torch.device('cpu')
+        return torch.device("mps")
+    return torch.device("cpu")
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -122,8 +127,8 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+
 def log_args(args, logger):
     for argname, argval in vars(args).items():
-        logger.write(f'{argname.replace("_"," ").capitalize()}: {argval}\n')
-    logger.write('\n')
-
+        logger.write(f"{argname.replace('_', ' ').capitalize()}: {argval}\n")
+    logger.write("\n")

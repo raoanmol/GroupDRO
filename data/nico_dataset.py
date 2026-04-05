@@ -17,9 +17,16 @@ class NICODataset(ConfounderDataset):
     Groups are defined as (class, context) pairs.
     """
 
-    def __init__(self, root_dir, target_name, confounder_names,
-                 model_type, augment_data,
-                 num_val_samples_per_class=None, split_seed=0):
+    def __init__(
+        self,
+        root_dir,
+        target_name,
+        confounder_names,
+        model_type,
+        augment_data,
+        num_val_samples_per_class=None,
+        split_seed=0,
+    ):
         self.root_dir = root_dir
         self.target_name = target_name
         self.confounder_names = confounder_names
@@ -27,7 +34,9 @@ class NICODataset(ConfounderDataset):
         self.augment_data = augment_data
 
         self.data_dir = os.path.join(root_dir, "DG_Benchmark", "NICO_DG_Benchmark")
-        annotation_dir = os.path.join(root_dir, "DG_Benchmark", "NICO_DG_Benchmark_annotation")
+        annotation_dir = os.path.join(
+            root_dir, "DG_Benchmark", "NICO_DG_Benchmark_annotation"
+        )
 
         # Determine which contexts to use
         self.contexts = sorted([c for c in ALL_CONTEXTS if c not in EXCLUDED_CONTEXTS])
@@ -43,7 +52,9 @@ class NICODataset(ConfounderDataset):
         for context in self.contexts:
             ctx_id = self.context_to_id[context]
             for split_name, split_val in [("train", 0), ("test", 2)]:
-                annotation_file = os.path.join(annotation_dir, f"{context}_{split_name}.txt")
+                annotation_file = os.path.join(
+                    annotation_dir, f"{context}_{split_name}.txt"
+                )
                 with open(annotation_file, "r") as f:
                     for line in f:
                         parts = line.strip().rsplit(maxsplit=1)
@@ -70,7 +81,9 @@ class NICODataset(ConfounderDataset):
         self.n_classes = NUM_CLASSES
         self.n_confounders = 1
         self.n_groups = self.n_classes * n_contexts
-        self.group_array = (self.y_array * n_contexts + self.confounder_array).astype(int)
+        self.group_array = (self.y_array * n_contexts + self.confounder_array).astype(
+            int
+        )
 
         # Handle validation splits
         rng = np.random.RandomState(split_seed)
@@ -85,16 +98,14 @@ class NICODataset(ConfounderDataset):
                 if len(class_indices) < num_val_samples_per_class:
                     sampled = class_indices
                 else:
-                    sampled = rng.choice(class_indices, size=num_val_samples_per_class, replace=False)
+                    sampled = rng.choice(
+                        class_indices, size=num_val_samples_per_class, replace=False
+                    )
                 id_val_indices.extend(sampled)
             id_val_indices = np.array(id_val_indices)
             self.split_array[id_val_indices] = 1  # id_val
 
-            self.split_dict = {
-                'train': 0,
-                'id_val': 1,
-                'test': 2
-            }
+            self.split_dict = {"train": 0, "id_val": 1, "test": 2}
         else:
             # 3-way split: sample ~10% of train per class as val
             train_indices = np.where(self.split_array == 0)[0]
@@ -108,41 +119,44 @@ class NICODataset(ConfounderDataset):
             val_indices = np.array(val_indices)
             self.split_array[val_indices] = 1  # val
 
-            self.split_dict = {
-                'train': 0,
-                'val': 1,
-                'test': 2
-            }
+            self.split_dict = {"train": 0, "val": 1, "test": 2}
 
         # Transforms
         self.features_mat = None
-        target_resolution = model_attributes[self.model_type]['target_resolution']
+        target_resolution = model_attributes[self.model_type]["target_resolution"]
         if target_resolution is None:
             target_resolution = (224, 224)
 
         if augment_data:
-            self.train_transform = transforms.Compose([
-                transforms.RandomResizedCrop(
-                    target_resolution,
-                    scale=(0.7, 1.0),
-                    ratio=(0.75, 1.3333333333333333),
-                    interpolation=2),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-            ])
+            self.train_transform = transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(
+                        target_resolution,
+                        scale=(0.7, 1.0),
+                        ratio=(0.75, 1.3333333333333333),
+                        interpolation=2,
+                    ),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+                ]
+            )
         else:
-            self.train_transform = transforms.Compose([
+            self.train_transform = transforms.Compose(
+                [
+                    transforms.Resize(target_resolution),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+                ]
+            )
+
+        self.eval_transform = transforms.Compose(
+            [
                 transforms.Resize(target_resolution),
                 transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-            ])
-
-        self.eval_transform = transforms.Compose([
-            transforms.Resize(target_resolution),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
 
     def group_str(self, group_idx):
         n_contexts = len(self.contexts)

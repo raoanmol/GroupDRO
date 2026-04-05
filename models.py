@@ -3,63 +3,58 @@ from torchvision import models
 
 
 model_attributes = {
-    'bert': {
-        'feature_type': 'text'
+    "bert": {"feature_type": "text"},
+    "inception_v3": {
+        "feature_type": "image",
+        "target_resolution": (299, 299),
+        "flatten": False,
     },
-    'inception_v3': {
-        'feature_type': 'image',
-        'target_resolution': (299, 299),
-        'flatten': False
+    "wideresnet50": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'wideresnet50': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "resnet50": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'resnet50': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "resnet34": {"feature_type": "image", "target_resolution": None, "flatten": False},
+    "resnet18": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'resnet34': {
-        'feature_type': 'image',
-        'target_resolution': None,
-        'flatten': False
+    "efficientnet_b0": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'resnet18': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "convnext_base": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'efficientnet_b0': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "vit_base16": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'convnext_base': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "swin_base": {
+        "feature_type": "image",
+        "target_resolution": (224, 224),
+        "flatten": False,
     },
-    'vit_base16': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
+    "raw_logistic_regression": {
+        "feature_type": "image",
+        "target_resolution": None,
+        "flatten": True,
     },
-    'swin_base': {
-        'feature_type': 'image',
-        'target_resolution': (224, 224),
-        'flatten': False
-    },
-    'raw_logistic_regression': {
-        'feature_type': 'image',
-        'target_resolution': None,
-        'flatten': True,
-    }
 }
 
 
 # --- Head-replacement helpers ---
+
 
 def _replace_resnet_head(model, num_classes):
     model.fc = nn.Linear(model.fc.in_features, num_classes)

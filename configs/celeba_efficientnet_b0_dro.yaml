@@ -1,0 +1,40 @@
+seed: 42
+device: "auto"
+
+data:
+  dataset: "CelebA"
+  shift_type: "confounder"
+  target_name: "Male"
+  confounder_names: ["Young"]
+  root_dir: "./celebA/data/"
+  fraction: 1.0
+  num_val_samples_per_class: 1495
+  batch_size: 64
+  num_workers: 4
+  reweight_groups: true
+  augment_data: false
+
+model:
+  name: "efficientnet_b0"
+  train_from_scratch: false
+
+training:
+  n_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.0001
+  scheduler: false
+  gamma: 0.1
+
+robustness:
+  robust: true
+  robust_step_size: 0.01
+  alpha: 0.2
+  generalization_adjustment: "0.0"
+
+logging:
+  log_dir: "./logs/celeba_efficientnet_b0_dro"
+  log_every: 50
+  save_step: 10
+  save_best: true
+  save_last: true
+  show_progress: true
